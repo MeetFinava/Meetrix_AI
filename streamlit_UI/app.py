@@ -1,158 +1,239 @@
 import streamlit as st
 import requests
-import os
 
 BACKEND_URL = "http://localhost:8000/api"
 
-st.set_page_config(page_title="Meetrix AI Web Builder", layout="wide")
-
-st.title("🚀 Meetrix AI - Web Builder")
+st.set_page_config(page_title="Meetrix AI", layout="wide")
 
 # -----------------------------
-# Step 1: Field Selection Form
+# Modern Card CSS
 # -----------------------------
+st.markdown("""
+<style>
+.card {
+    padding: 25px;
+    border-radius: 18px;
+    background-color: #111827;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    transition: 0.3s ease-in-out;
+    height: 230px;
+}
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+}
+.card-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+.card-desc {
+    font-size: 14px;
+    color: #9CA3AF;
+    margin-bottom: 15px;
+}
+.stButton>button {
+    border-radius: 10px;
+    width: 100%;
+}
+</style>
+""", unsafe_allow_html=True)
 
-with st.form("web_builder_form"):
+# -----------------------------
+# Router State
+# -----------------------------
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "home"
 
-    col1, col2 = st.columns(2)
+def go_to(page):
+    st.session_state.current_page = page
+    st.rerun()
 
-    with col1:
-        project_name = st.text_input("Project Name")
-        website_type = st.selectbox(
-            "Website Type",
-            ["Hospital", "E-commerce", "Portfolio", "Gym", "School", "SaaS"]
-        )
-        styling_framework = st.selectbox(
-            "Styling Framework",
-            ["CSS", "Bootstrap", "Tailwind"]
-        )
-        theme = st.selectbox(
-            "Theme",
-            ["Modern", "Minimal", "Dark", "Corporate"]
-        )
-        frontend_framework = st.selectbox(
-            "Frontend Framework",
-            ["HTML", "React", "Next.js"]
-        )
+# =============================
+# HOME PAGE
+# =============================
+def show_home():
 
-    with col2:
-        backend_required = st.radio("Backend Required?", ["Yes", "No"])
-        backend_framework = None
-        database = None
+    st.title("🚀 Meetrix AI Platform")
+    st.write("Multi-Feature AI Suite")
 
-        if backend_required == "Yes":
-            backend_framework = st.selectbox(
-                "Backend Framework",
-                ["FastAPI", "Node.js", "Django"]
+    col1, col2, col3 = st.columns(3)
+
+    features = [
+        ("🛠 Web Builder", "Generate full-stack apps instantly.", "web_builder"),
+        ("🎨 Image Generation", "AI image creation engine.", "image_generation"),
+        ("🎬 Video Generation", "Generate AI videos.", "video_generation"),
+        ("📐 Math Solver", "Solve equations step-by-step.", "math_solver"),
+        ("📄 Chat with PDF (RAG)", "Ask questions from documents.", "rag_chat"),
+        ("✨ Prompt Generator", "Generate powerful prompts.", "prompt_generator"),
+        ("💡 Project Suggestion AI", "Get smart project ideas.", "project_ai"),
+        ("📚 Research / Thesis Bot", "Academic research assistant.", "research_bot")
+    ]
+
+    columns = [col1, col2, col3]
+    for i, (title, desc, key) in enumerate(features):
+        with columns[i % 3]:
+            st.markdown(f"""
+            <div class="card">
+                <div class="card-title">{title}</div>
+                <div class="card-desc">{desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.button("Open", key=key):
+                go_to(key)
+
+# =============================
+# WEB BUILDER PAGE
+# =============================
+def show_web_builder():
+
+    if st.button("⬅ Back to Home"):
+        go_to("home")
+
+    st.title("🛠 Web Builder")
+
+    with st.form("web_builder_form"):
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            project_name = st.text_input("Project Name")
+            website_type = st.selectbox(
+                "Website Type",
+                ["Hospital", "E-commerce", "Portfolio", "Gym", "School", "SaaS"]
             )
-            database = st.selectbox(
-                "Database",
-                ["SQLite", "PostgreSQL", "MongoDB"]
+            styling_framework = st.selectbox(
+                "Styling Framework",
+                ["CSS", "Bootstrap", "Tailwind"]
+            )
+            theme = st.selectbox(
+                "Theme",
+                ["Modern", "Minimal", "Dark", "Corporate"]
+            )
+            frontend_framework = st.selectbox(
+                "Frontend Framework",
+                ["HTML", "React", "Next.js"]
             )
 
-        pages = st.multiselect(
-            "Select Pages",
-            ["Home", "About", "Contact", "Services", "Blog", "Login", "Dashboard"]
-        )
+        with col2:
+            backend_required = st.radio("Backend Required?", ["Yes", "No"])
+            backend_framework = None
+            database = None
 
-        authentication = st.checkbox("Authentication")
-        payment_integration = st.checkbox("Payment Integration")
-        admin_panel = st.checkbox("Admin Panel")
+            if backend_required == "Yes":
+                backend_framework = st.selectbox(
+                    "Backend Framework",
+                    ["FastAPI", "Node.js", "Django"]
+                )
+                database = st.selectbox(
+                    "Database",
+                    ["SQLite", "PostgreSQL", "MongoDB"]
+                )
 
-    generate_prompt_btn = st.form_submit_button("Generate Prompt")
+            pages = st.multiselect(
+                "Select Pages",
+                ["Home", "About", "Contact", "Services", "Blog", "Login", "Dashboard"]
+            )
 
+            # ✅ REQUIRED FIELDS (FIXED)
+            authentication = st.checkbox("Authentication")
+            payment_integration = st.checkbox("Payment Integration")
+            admin_panel = st.checkbox("Admin Panel")
 
-# -----------------------------
-# Step 2: Generate Prompt
-# -----------------------------
+        submitted = st.form_submit_button("Generate & Build")
 
-if generate_prompt_btn:
+    if submitted:
 
-    st.session_state.payload = {
-        "project_name": project_name,
-        "website_type": website_type,
-        "styling_framework": styling_framework,
-        "theme": theme,
-        "frontend_framework": frontend_framework,
-        "backend_required": backend_required == "Yes",
-        "backend_framework": backend_framework,
-        "database": database,
-        "pages": pages,
-        "authentication": authentication,
-        "payment_integration": payment_integration,
-        "admin_panel": admin_panel
-    }
-
-    with st.spinner("🧠 Generating Prompt..."):
-        response = requests.post(
-            f"{BACKEND_URL}/generate-prompt",
-            json=st.session_state.payload
-        )
-
-    if response.status_code == 200:
-        st.session_state.generated_prompt = response.json()["generated_prompt"]
-    else:
-        st.error("❌ Prompt generation failed.")
-
-
-# -----------------------------
-# Step 3: Editable Prompt + Build
-# -----------------------------
-
-if "generated_prompt" in st.session_state:
-
-    st.subheader("🧠 Generated Prompt (Edit if needed)")
-
-    edited_prompt = st.text_area(
-        "Prompt",
-        value=st.session_state.generated_prompt,
-        height=300
-    )
-
-    if st.button("🚀 Generate Website"):
-
-        if "payload" not in st.session_state:
-            st.error("⚠️ Please generate prompt first.")
-            st.stop()
+        payload = {
+            "project_name": project_name,
+            "website_type": website_type,
+            "styling_framework": styling_framework,
+            "theme": theme,
+            "frontend_framework": frontend_framework,
+            "backend_required": backend_required == "Yes",
+            "backend_framework": backend_framework,
+            "database": database,
+            "pages": pages,
+            "authentication": authentication,
+            "payment_integration": payment_integration,
+            "admin_panel": admin_panel
+        }
 
         st.subheader("📁 Building Project Live...")
 
         response = requests.post(
             f"{BACKEND_URL}/build-project",
-            json=st.session_state.payload,
+            json=payload,
             stream=True
         )
 
         output_area = st.empty()
         log_text = ""
-        zip_file_path = None
+        build_success = False
+        zip_path = None
 
         for chunk in response.iter_content(chunk_size=1024):
             if chunk:
                 decoded = chunk.decode("utf-8")
                 log_text += decoded
 
-                # Detect ZIP signal
                 if "DOWNLOAD_READY::" in log_text:
                     parts = log_text.split("DOWNLOAD_READY::")
-                    zip_file_path = parts[1].strip()
-                    log_text = parts[0]  # Remove signal from display
+                    zip_path = parts[1].strip()
+                    log_text = parts[0]
+
+                if "BUILD SUCCESS" in log_text:
+                    build_success = True
 
                 output_area.text(log_text)
 
-        st.success("✅ Project Build Completed Successfully!")
-
-        # -----------------------------
-        # Show Download Button
-        # -----------------------------
-        if zip_file_path:
-            project_name = st.session_state.payload["project_name"]
-
-            download_url = f"{BACKEND_URL}/download/{project_name}"
-
-            st.markdown(
-                f"[⬇️ Download Project ZIP]({download_url})",
-                unsafe_allow_html=True
-            )
+        if build_success:
+            st.success("✅ Project Build Completed Successfully!")
+            if zip_path:
+                project_name = payload["project_name"]
+                download_url = f"{BACKEND_URL}/download/{project_name}"
+                st.markdown(f"[⬇️ Download Project ZIP]({download_url})")
         else:
-            st.warning("⚠️ ZIP file not found.")
+            st.error("❌ Project Build Failed.")
+
+# =============================
+# SIMPLE FEATURE PAGES
+# =============================
+def simple_page(title, message):
+    if st.button("⬅ Back to Home"):
+        go_to("home")
+    st.title(title)
+    st.info(message)
+
+# =============================
+# ROUTER
+# =============================
+page = st.session_state.current_page
+
+if page == "home":
+    show_home()
+
+elif page == "web_builder":
+    show_web_builder()
+
+elif page == "image_generation":
+    simple_page("🎨 Image Generation", "Feature under development.")
+
+elif page == "video_generation":
+    simple_page("🎬 Video Generation", "Feature under development.")
+
+elif page == "math_solver":
+    simple_page("📐 Math Solver", "Feature under development.")
+
+elif page == "rag_chat":
+    simple_page("📄 Chat with PDF (RAG)", "Feature under development.")
+
+elif page == "prompt_generator":
+    simple_page("✨ Prompt Generator", "Feature under development.")
+
+elif page == "project_ai":
+    simple_page("💡 Project Suggestion AI", "Feature under development.")
+
+elif page == "research_bot":
+    simple_page("📚 Research / Thesis Bot", "Feature under development.")

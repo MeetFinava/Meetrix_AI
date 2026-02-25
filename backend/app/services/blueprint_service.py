@@ -1,8 +1,7 @@
-from langchain_core.messages import HumanMessage
-from app.services.llm_config import llm
+from app.services.llm_router import generate_response
 
 
-def generate_blueprint(data: dict) -> str:
+def generate_blueprint(data: dict, provider: str = "groq") -> str:
     instruction = f"""
 You are a senior full-stack architect.
 
@@ -40,5 +39,6 @@ NO explanation.
 NO extra text.
 """
 
-    response = llm.invoke([HumanMessage(content=instruction)])
-    return response.content
+    blueprint = generate_response(instruction, provider)
+
+    return blueprint

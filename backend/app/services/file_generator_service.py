@@ -1,8 +1,13 @@
-from langchain_core.messages import HumanMessage
-from app.services.llm_config import llm
+from app.services.llm_router import generate_response
 
 
-def generate_file_content(project_name: str, file_path: str, blueprint: str) -> str:
+def generate_file_content(
+    project_name: str,
+    file_path: str,
+    blueprint: str,
+    provider: str = "groq"
+) -> str:
+
     instruction = f"""
 You are a senior software engineer.
 
@@ -25,5 +30,6 @@ Rules:
 - Include all necessary imports.
 """
 
-    response = llm.invoke([HumanMessage(content=instruction)])
-    return response.content
+    content = generate_response(instruction, provider)
+
+    return content
