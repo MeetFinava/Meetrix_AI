@@ -197,6 +197,105 @@ def show_web_builder():
         else:
             st.error("❌ Project Build Failed.")
 
+
+def show_image_generation():
+
+    if st.button("⬅ Back to Home"):
+        go_to("home")
+
+    st.title("🎨 Image Generation")
+
+    with st.form("image_form"):
+        prompt = st.text_area(
+            "Enter Prompt",
+            placeholder="A futuristic hospital UI design, modern, clean..."
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            width = st.selectbox("Width", [256, 512, 768], index=1)
+        with col2:
+            height = st.selectbox("Height", [256, 512, 768], index=1)
+
+        negative_prompt = st.text_input(
+            "Negative Prompt (optional)",
+            placeholder="blurry, low quality"
+        )
+
+        submitted = st.form_submit_button("Generate Image")
+
+    # =============================
+    # GENERATE IMAGE
+    # =============================
+    if submitted:
+
+        if not prompt.strip():
+            st.warning("⚠️ Please enter a prompt")
+            return
+
+        payload = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "width": width,
+            "height": height
+        }
+
+        st.subheader("🧠 Generating Image...")
+
+        with st.spinner("AI is creating your image..."):
+
+            try:
+                response = requests.post(
+                    f"{BACKEND_URL}/image/generate-image",
+                    json=payload
+                )
+
+                # =============================
+                # SUCCESS RESPONSE
+                # =============================
+                if response.status_code == 200:
+
+                    content_type = response.headers.get("content-type", "")
+
+                    # ✅ Check if it's actually an image
+                    if "image" in content_type:
+
+                        st.image(
+                            response.content,
+                            caption="Generated Image",
+                            use_container_width=True
+                        )
+
+                        st.success("✅ Image Generated Successfully!")
+
+                        st.download_button(
+                            label="⬇️ Download Image",
+                            data=response.content,
+                            file_name="generated_image.png",
+                            mime="image/png"
+                        )
+
+                    else:
+                        # ❌ Not an image (probably error JSON)
+                        st.error("❌ Invalid response from server")
+                        st.text(response.text)
+
+                # =============================
+                # ERROR RESPONSE
+                # =============================
+                else:
+                    error_msg = response.text
+
+                    if "loading" in error_msg.lower():
+                        st.warning("⏳ Model is loading... try again in 10 seconds")
+                    else:
+                        st.error("❌ Failed to generate image")
+                        st.text(error_msg)
+
+            except Exception as e:
+                st.error(f"🚨 Error: {e}")
+
+                
 # =============================
 # SIMPLE FEATURE PAGES
 # =============================
@@ -218,7 +317,7 @@ elif page == "web_builder":
     show_web_builder()
 
 elif page == "image_generation":
-    simple_page("🎨 Image Generation", "Feature under development.")
+    show_image_generation()
 
 elif page == "video_generation":
     simple_page("🎬 Video Generation", "Feature under development.")

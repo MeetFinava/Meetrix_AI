@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.web_builder import router as web_builder_router
+from app.routes import image_generation
+
 
 app = FastAPI(
     title="Meetrix AI Backend",
@@ -19,8 +21,11 @@ app.add_middleware(
 
 # ✅ Include Web Builder Routes
 app.include_router(web_builder_router, prefix="/api")
+app.include_router(image_generation.router,  prefix="/api/image")
 
 
 @app.get("/")
 def root():
     return {"message": "Meetrix AI Backend Running 🚀"}
+
+
