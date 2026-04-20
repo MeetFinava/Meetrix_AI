@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()  # ← Add this BEFORE any other imports that use env vars
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.web_builder import router as web_builder_router
