@@ -1,14 +1,15 @@
-import streamlit as st
+from pathlib import Path
+
 import requests
+import streamlit as st
+
 
 BACKEND_URL = "http://localhost:8000/api"
 
 st.set_page_config(page_title="Meetrix AI", layout="wide")
 
-# -----------------------------
-# Modern Card CSS
-# -----------------------------
-st.markdown("""
+st.markdown(
+    """
 <style>
 .card {
     padding: 25px;
@@ -37,106 +38,261 @@ st.markdown("""
     width: 100%;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# -----------------------------
-# Router State
-# -----------------------------
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "home"
 
-def go_to(page):
+def init_state():
+    defaults = {
+        "current_page": "home",
+        "auth_token": None,
+        "user": None,
+        "chat_session_id": None,
+        "chat_messages": [],
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def go_to(page: str):
     st.session_state.current_page = page
     st.rerun()
 
-# =============================
-# HOME PAGE
-# =============================
-def show_home():
 
-    st.title("🚀 Meetrix AI Platform")
+def auth_headers() -> dict:
+    token = st.session_state.get("auth_token")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def api_request(method: str, path: str, **kwargs):
+    headers = kwargs.pop("headers", {})
+    merged_headers = {**auth_headers(), **headers}
+    return requests.request(method, f"{BACKEND_URL}{path}", headers=merged_headers, timeout=kwargs.pop("timeout", 120), **kwargs)
+
+
+def backend_available() -> bool:
+    try:
+        response = requests.get("http://localhost:8000/health", timeout=3)
+        return response.status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def parse_api_error(response) -> tuple[str, str | None]:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+
+    if isinstance(payload, list):
+        return ("The server returned an unexpected error format.", "Please retry. If it continues, check the backend logs.")
+
+    message = payload.get("message") or payload.get("detail")
+    suggestion = payload.get("suggestion")
+
+    if isinstance(message, list):
+        parts = []
+        for item in message:
+            if isinstance(item, dict):
+                parts.append(item.get("msg", "Invalid input"))
+        message = " ".join(parts)
+
+    if not message and response.status_code == 401:
+        message = "Authentication failed."
+        suggestion = "Check your email and password, then try again."
+    elif not message and response.status_code == 422:
+        message = "Some form fields are invalid."
+        suggestion = "Review your entries and try again."
+    elif not message and response.status_code >= 500:
+        message = "The backend returned an internal error."
+        suggestion = "Retry in a moment. If it continues, restart the backend."
+    elif not message:
+        message = response.text or "Request failed."
+
+    return message, suggestion
+
+
+def show_api_error(response, fallback_title: str):
+    message, suggestion = parse_api_error(response)
+    st.error(f"{fallback_title}: {message}")
+    if suggestion:
+        st.info(f"Suggestion: {suggestion}")
+
+
+def show_request_exception(error: Exception, fallback_title: str):
+    if isinstance(error, requests.ConnectionError):
+        st.error(f"{fallback_title}: Cannot connect to the backend.")
+        st.info("Suggestion: Start the FastAPI backend and confirm it is running on http://localhost:8000.")
+        return
+    if isinstance(error, requests.Timeout):
+        st.error(f"{fallback_title}: The request timed out.")
+        st.info("Suggestion: Retry once. If it keeps timing out, check the backend service or reduce the workload.")
+        return
+
+    st.error(f"{fallback_title}: {error}")
+    st.info("Suggestion: Retry once. If it continues, check whether this is a frontend or backend issue.")
+
+
+def handle_auth_response(response):
+    payload = response.json()
+    st.session_state.auth_token = payload["token"]
+    st.session_state.user = payload["user"]
+    st.session_state.chat_session_id = None
+    st.session_state.chat_messages = []
+    go_to("home")
+
+
+def show_auth_page():
+    st.title("Meetrix AI Login")
+    st.caption("Create an account to save projects, images, videos, and conversations.")
+    if not backend_available():
+        st.warning("Backend offline. Start the FastAPI server before logging in or registering.")
+        st.code("cd d:\\Meetrix_AI\\backend\n.\\run_backend.ps1")
+
+    login_tab, register_tab = st.tabs(["Login", "Register"])
+
+    with login_tab:
+        with st.form("login_form"):
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_password")
+            submitted = st.form_submit_button("Login")
+
+        if submitted:
+            try:
+                response = api_request("POST", "/auth/login", json={"email": email, "password": password}, timeout=30)
+                if response.status_code == 200:
+                    handle_auth_response(response)
+                else:
+                    show_api_error(response, "Login failed")
+            except Exception as error:
+                show_request_exception(error, "Login failed")
+
+    with register_tab:
+        with st.form("register_form"):
+            full_name = st.text_input("Full Name")
+            email = st.text_input("Email", key="register_email")
+            password = st.text_input("Password", type="password", key="register_password")
+            submitted = st.form_submit_button("Create Account")
+
+        if submitted:
+            if len(password) < 8:
+                st.error("Registration failed: Password must be at least 8 characters.")
+                st.info("Suggestion: Use a stronger password like `meet1234` or `Password123!`.")
+                return
+            try:
+                response = api_request(
+                    "POST",
+                    "/auth/register",
+                    json={"full_name": full_name, "email": email, "password": password},
+                    timeout=30,
+                )
+                if response.status_code == 200:
+                    handle_auth_response(response)
+                else:
+                    show_api_error(response, "Registration failed")
+            except Exception as error:
+                show_request_exception(error, "Registration failed")
+
+
+def logout():
+    try:
+        api_request("POST", "/auth/logout", timeout=30)
+    except Exception:
+        pass
+    st.session_state.auth_token = None
+    st.session_state.user = None
+    st.session_state.chat_session_id = None
+    st.session_state.chat_messages = []
+    go_to("auth")
+
+
+def require_auth() -> bool:
+    if not st.session_state.get("auth_token"):
+        show_auth_page()
+        return False
+    return True
+
+
+def render_sidebar():
+    with st.sidebar:
+        st.title("Meetrix AI")
+        user = st.session_state.get("user") or {}
+        st.write(user.get("full_name", "Unknown User"))
+        st.caption(user.get("email", ""))
+
+        pages = {
+            "home": "Home",
+            "web_builder": "Web Builder",
+            "image_generation": "Image Generation",
+            "video_generation": "Video Generation",
+            "rag_chat": "Chat with PDF",
+            "history": "My History",
+        }
+
+        if user.get("is_admin"):
+            pages["admin"] = "Admin"
+
+        for key, label in pages.items():
+            if st.button(label, key=f"nav_{key}"):
+                go_to(key)
+
+        if st.button("Logout", key="logout"):
+            logout()
+
+
+def show_home():
+    st.title("Meetrix AI Platform")
     st.write("Multi-Feature AI Suite")
 
     col1, col2, col3 = st.columns(3)
-
     features = [
-        ("🛠 Web Builder", "Generate full-stack apps instantly.", "web_builder"),
-        ("🎨 Image Generation", "AI image creation engine.", "image_generation"),
-        ("🎬 Video Generation", "Generate AI videos from text.", "video_generation"),
-        ("📐 Math Solver", "Solve equations step-by-step.", "math_solver"),
-        ("📄 Chat with PDF (RAG)", "Ask questions from documents.", "rag_chat"),
-        ("✨ Prompt Generator", "Generate powerful prompts.", "prompt_generator"),
-        ("💡 Project Suggestion AI", "Get smart project ideas.", "project_ai"),
-        ("📚 Research / Thesis Bot", "Academic research assistant.", "research_bot"),
+        ("Web Builder", "Generate full-stack apps instantly.", "web_builder"),
+        ("Image Generation", "AI image creation engine.", "image_generation"),
+        ("Video Generation", "Generate AI videos from text.", "video_generation"),
+        ("Chat with PDF", "Ask questions from documents with saved history.", "rag_chat"),
+        ("My History", "See your projects, media, and conversations.", "history"),
     ]
 
     columns = [col1, col2, col3]
-    for i, (title, desc, key) in enumerate(features):
-        with columns[i % 3]:
-            st.markdown(f"""
-            <div class="card">
-                <div class="card-title">{title}</div>
-                <div class="card-desc">{desc}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
+    for index, (title, desc, key) in enumerate(features):
+        with columns[index % 3]:
+            st.markdown(
+                f"""
+                <div class="card">
+                    <div class="card-title">{title}</div>
+                    <div class="card-desc">{desc}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
             if st.button("Open", key=key):
                 go_to(key)
 
 
-# =============================
-# WEB BUILDER PAGE
-# =============================
 def show_web_builder():
-
-    if st.button("⬅ Back to Home"):
-        go_to("home")
-
-    st.title("🛠 Web Builder")
+    st.title("Web Builder")
 
     with st.form("web_builder_form"):
-
         col1, col2 = st.columns(2)
 
         with col1:
             project_name = st.text_input("Project Name")
-            website_type = st.selectbox(
-                "Website Type",
-                ["Hospital", "E-commerce", "Portfolio", "Gym", "School", "SaaS"]
-            )
-            styling_framework = st.selectbox(
-                "Styling Framework",
-                ["CSS", "Bootstrap", "Tailwind"]
-            )
-            theme = st.selectbox(
-                "Theme",
-                ["Modern", "Minimal", "Dark", "Corporate"]
-            )
-            frontend_framework = st.selectbox(
-                "Frontend Framework",
-                ["HTML", "React", "Next.js"]
-            )
+            website_type = st.selectbox("Website Type", ["Hospital", "E-commerce", "Portfolio", "Gym", "School", "SaaS"])
+            styling_framework = st.selectbox("Styling Framework", ["CSS", "Bootstrap", "Tailwind"])
+            theme = st.selectbox("Theme", ["Modern", "Minimal", "Dark", "Corporate"])
+            frontend_framework = st.selectbox("Frontend Framework", ["HTML", "React", "Next.js"])
 
         with col2:
             backend_required = st.radio("Backend Required?", ["Yes", "No"])
             backend_framework = None
             database = None
-
             if backend_required == "Yes":
-                backend_framework = st.selectbox(
-                    "Backend Framework",
-                    ["FastAPI", "Node.js", "Django"]
-                )
-                database = st.selectbox(
-                    "Database",
-                    ["SQLite", "PostgreSQL", "MongoDB"]
-                )
+                backend_framework = st.selectbox("Backend Framework", ["FastAPI", "Node.js", "Django"])
+                database = st.selectbox("Database", ["PostgreSQL", "SQLite", "MongoDB"])
 
-            pages = st.multiselect(
-                "Select Pages",
-                ["Home", "About", "Contact", "Services", "Blog", "Login", "Dashboard"]
-            )
-
+            pages = st.multiselect("Select Pages", ["Home", "About", "Contact", "Services", "Blog", "Login", "Dashboard"])
             authentication = st.checkbox("Authentication")
             payment_integration = st.checkbox("Payment Integration")
             admin_panel = st.checkbox("Admin Panel")
@@ -144,7 +300,6 @@ def show_web_builder():
         submitted = st.form_submit_button("Generate & Build")
 
     if submitted:
-
         payload = {
             "project_name": project_name,
             "website_type": website_type,
@@ -160,77 +315,65 @@ def show_web_builder():
             "admin_panel": admin_panel,
         }
 
-        st.subheader("📁 Building Project Live...")
+        st.subheader("Building Project Live...")
+        try:
+            response = api_request("POST", "/build-project", json=payload, stream=True, timeout=360)
+            if response.status_code != 200:
+                show_api_error(response, "Project build failed")
+                return
 
-        response = requests.post(
-            f"{BACKEND_URL}/build-project",
-            json=payload,
-            stream=True,
-        )
+            output_area = st.empty()
+            log_text = ""
+            build_success = False
 
-        output_area = st.empty()
-        log_text = ""
-        build_success = False
-        zip_path = None
-
-        for chunk in response.iter_content(chunk_size=1024):
-            if chunk:
+            for chunk in response.iter_content(chunk_size=1024):
+                if not chunk:
+                    continue
                 decoded = chunk.decode("utf-8")
                 log_text += decoded
-
-                if "DOWNLOAD_READY::" in log_text:
-                    parts = log_text.split("DOWNLOAD_READY::")
-                    zip_path = parts[1].strip()
-                    log_text = parts[0]
-
                 if "BUILD SUCCESS" in log_text:
                     build_success = True
-
                 output_area.text(log_text)
 
-        if build_success:
-            st.success("✅ Project Build Completed Successfully!")
-            if zip_path:
-                project_name = payload["project_name"]
-                download_url = f"{BACKEND_URL}/download/{project_name}"
-                st.markdown(f"[⬇️ Download Project ZIP]({download_url})")
-        else:
-            st.error("❌ Project Build Failed.")
+            if build_success:
+                st.success("Project Build Completed Successfully")
+                history = api_request("GET", "/auth/history", timeout=30).json()
+                latest_project = history["projects"][0] if history["projects"] else None
+                if latest_project:
+                    download_response = api_request(
+                        "GET",
+                        f"/download/{latest_project['project_slug']}",
+                        timeout=120,
+                    )
+                    if download_response.status_code == 200:
+                        st.download_button(
+                            label="Download Project ZIP",
+                            data=download_response.content,
+                            file_name=f"{latest_project['project_name']}.zip",
+                            mime="application/zip",
+                        )
+            else:
+                st.error("Project Build Failed")
+        except Exception as error:
+            show_request_exception(error, "Project build failed")
 
 
-# =============================
-# IMAGE GENERATION PAGE
-# =============================
 def show_image_generation():
-
-    if st.button("⬅ Back to Home"):
-        go_to("home")
-
-    st.title("🎨 Image Generation")
+    st.title("Image Generation")
 
     with st.form("image_form"):
-        prompt = st.text_area(
-            "Enter Prompt",
-            placeholder="A futuristic hospital UI design, modern, clean...",
-        )
-
+        prompt = st.text_area("Enter Prompt", placeholder="A futuristic hospital UI design, modern, clean...")
         col1, col2 = st.columns(2)
         with col1:
             width = st.selectbox("Width", [256, 512, 768], index=1)
         with col2:
             height = st.selectbox("Height", [256, 512, 768], index=1)
-
-        negative_prompt = st.text_input(
-            "Negative Prompt (optional)",
-            placeholder="blurry, low quality",
-        )
-
+        negative_prompt = st.text_input("Negative Prompt (optional)", placeholder="blurry, low quality")
         submitted = st.form_submit_button("Generate Image")
 
     if submitted:
-
         if not prompt.strip():
-            st.warning("⚠️ Please enter a prompt")
+            st.warning("Please enter a prompt")
             return
 
         payload = {
@@ -240,253 +383,105 @@ def show_image_generation():
             "height": height,
         }
 
-        st.subheader("🧠 Generating Image...")
-
         with st.spinner("AI is creating your image..."):
             try:
-                response = requests.post(
-                    f"{BACKEND_URL}/image/generate-image",
-                    json=payload,
-                )
-
-                if response.status_code == 200:
-                    content_type = response.headers.get("content-type", "")
-
-                    if "image" in content_type:
-                        st.image(
-                            response.content,
-                            caption="Generated Image",
-                            use_container_width=True,
-                        )
-                        st.success("✅ Image Generated Successfully!")
-                        st.download_button(
-                            label="⬇️ Download Image",
-                            data=response.content,
-                            file_name="generated_image.png",
-                            mime="image/png",
-                        )
-                    else:
-                        st.error("❌ Invalid response from server")
-                        st.text(response.text)
+                response = api_request("POST", "/image/generate-image", json=payload, timeout=240)
+                if response.status_code == 200 and "image" in response.headers.get("content-type", ""):
+                    st.image(response.content, caption="Generated Image", use_container_width=True)
+                    st.download_button("Download Image", data=response.content, file_name="generated_image.png", mime="image/png")
                 else:
-                    error_msg = response.text
-                    if "loading" in error_msg.lower():
-                        st.warning("⏳ Model is loading... try again in 10 seconds")
-                    else:
-                        st.error("❌ Failed to generate image")
-                        st.text(error_msg)
-
-            except Exception as e:
-                st.error(f"🚨 Error: {e}")
+                    show_api_error(response, "Image generation failed")
+            except Exception as error:
+                show_request_exception(error, "Image generation failed")
 
 
-# =============================
-# VIDEO GENERATION PAGE  ← NEW
-# =============================
 def show_video_generation():
+    st.title("Video Generation")
+    st.caption("Saved video generations will appear in My History.")
 
-    if st.button("⬅ Back to Home"):
-        go_to("home")
-
-    st.title("🎬 Video Generation")
-    st.caption("Powered by ModelScope Text-to-Video 1.7B (Open-Source · Apache 2.0)")
-
-    st.info(
-        "⏳ **Video generation takes 1–3 minutes** on first run (model cold start). "
-        "Subsequent requests are faster. Keep the tab open and wait — "
-        "a loading spinner will show progress."
-    )
-
-    # ── Form ─────────────────────────────────────────────────────────────────
     with st.form("video_form"):
-
-        prompt = st.text_area(
-            "📝 Video Prompt",
-            placeholder=(
-                "A panda eating bamboo in a lush forest, cinematic, 4k...\n"
-                "Tip: Be descriptive — mention lighting, motion, style."
-            ),
-            height=100,
-        )
-
-        negative_prompt = st.text_input(
-            "🚫 Negative Prompt (optional)",
-            placeholder="blurry, low quality, static, no motion",
-        )
-
-        st.markdown("#### ⚙️ Advanced Settings")
+        prompt = st.text_area("Video Prompt", placeholder="A panda eating bamboo in a lush forest, cinematic, 4k...", height=100)
+        negative_prompt = st.text_input("Negative Prompt (optional)", placeholder="blurry, low quality, static")
         col1, col2, col3 = st.columns(3)
-
         with col1:
-            num_frames = st.select_slider(
-                "Frames",
-                options=[8, 12, 16, 20, 24],
-                value=16,
-                help="More frames = longer video but slower generation",
-            )
-            fps = st.select_slider(
-                "Playback FPS",
-                options=[4, 6, 8, 10, 12],
-                value=8,
-            )
-
+            num_frames = st.select_slider("Frames", options=[8, 12, 16, 20, 24], value=16)
+            fps = st.select_slider("Playback FPS", options=[4, 6, 8, 10, 12], value=8)
         with col2:
             width = st.selectbox("Width (px)", [256, 320, 512], index=2)
             height = st.selectbox("Height (px)", [256, 320, 512], index=1)
-
         with col3:
-            num_inference_steps = st.slider(
-                "Inference Steps",
-                min_value=10,
-                max_value=50,
-                value=25,
-                step=5,
-                help="Higher = better quality, slower generation",
-            )
-            guidance_scale = st.slider(
-                "Guidance Scale",
-                min_value=1.0,
-                max_value=15.0,
-                value=7.5,
-                step=0.5,
-                help="How closely the video follows your prompt",
-            )
+            num_inference_steps = st.slider("Inference Steps", min_value=10, max_value=50, value=25, step=5)
+            guidance_scale = st.slider("Guidance Scale", min_value=1.0, max_value=15.0, value=7.5, step=0.5)
 
-        submitted = st.form_submit_button("🎬 Generate Video", use_container_width=True)
+        submitted = st.form_submit_button("Generate Video", use_container_width=True)
 
-    # ── Generate ─────────────────────────────────────────────────────────────
     if submitted:
-
         if not prompt.strip():
-            st.warning("⚠️ Please enter a prompt before generating.")
+            st.warning("Please enter a prompt before generating.")
             return
 
         payload = {
-            "prompt":               prompt.strip(),
-            "negative_prompt":      negative_prompt.strip() or None,
-            "num_frames":           num_frames,
-            "num_inference_steps":  num_inference_steps,
-            "guidance_scale":       guidance_scale,
-            "width":                width,
-            "height":               height,
-            "fps":                  fps,
+            "prompt": prompt.strip(),
+            "negative_prompt": negative_prompt.strip() or None,
+            "num_frames": num_frames,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "width": width,
+            "height": height,
+            "fps": fps,
         }
 
-        est_seconds = int(num_frames * num_inference_steps * 0.4)
-        st.markdown(f"🕐 Estimated time: **~{est_seconds}–{est_seconds + 60} seconds**")
-
-        with st.spinner("🧠 AI is generating your video... Please wait (1–3 min)"):
+        with st.spinner("AI is generating your video..."):
             try:
-                response = requests.post(
-                    f"{BACKEND_URL}/video/generate-video",
-                    json=payload,
-                    timeout=360,
-                )
-
+                response = api_request("POST", "/video/generate-video", json=payload, timeout=420)
                 if response.status_code == 200:
-                    content_type = response.headers.get("content-type", "")
-
-                    if "image/gif" in content_type or len(response.content) > 1000:
-                        st.success("✅ Video Generated Successfully!")
-
-                        st.image(
-                            response.content,
-                            caption=f"Generated Video ({num_frames} frames @ {fps} fps)",
-                            use_container_width=True,
-                        )
-
-                        with st.expander("📝 Prompt used"):
-                            st.write(f"**Prompt:** {prompt}")
-                            if negative_prompt:
-                                st.write(f"**Negative:** {negative_prompt}")
-                            st.write(
-                                f"**Settings:** {num_frames} frames | "
-                                f"{width}×{height}px | "
-                                f"{num_inference_steps} steps | "
-                                f"CFG {guidance_scale} | "
-                                f"{fps} fps"
-                            )
-
-                        st.download_button(
-                            label="⬇️ Download GIF",
-                            data=response.content,
-                            file_name="meetrix_ai_video.gif",
-                            mime="image/gif",
-                            use_container_width=True,
-                        )
-                    else:
-                        st.error("❌ Received an invalid response from server.")
-                        st.text(response.text[:500])
-
+                    st.image(response.content, caption="Generated Video", use_container_width=True)
+                    st.download_button("Download GIF", data=response.content, file_name="meetrix_ai_video.gif", mime="image/gif")
                 else:
-                    error_text = response.text.lower()
-                    if "loading" in error_text:
-                        st.warning(
-                            "⏳ Model is loading (~30–60s cold start). "
-                            "Click **Generate Video** again in ~30 seconds."
-                        )
-                    elif "timeout" in error_text:
-                        st.warning(
-                            "⏳ Timed out — try reducing **Frames** to 8 and **Steps** to 10."
-                        )
-                    else:
-                        st.error(f"❌ Generation failed (HTTP {response.status_code})")
-                        st.code(response.text[:800])
+                    show_api_error(response, "Video generation failed")
+            except Exception as error:
+                show_request_exception(error, "Video generation failed")
 
-            except requests.exceptions.Timeout:
-                st.error(
-                    "🚨 Timed out after 6 minutes. "
-                    "Reduce Frames to 8 and Steps to 10 for a faster result."
-                )
-            except requests.exceptions.ConnectionError:
-                st.error(
-                    "🚨 Cannot connect to backend. "
-                    "Make sure FastAPI is running at http://localhost:8000"
-                )
-            except Exception as e:
-                st.error(f"🚨 Unexpected error: {e}")
 
-    with st.expander("💡 Tips for better videos"):
-        st.markdown("""
-        **Good prompts:**
-        - `A golden retriever running on a beach at sunset, slow motion`
-        - `Time-lapse of clouds moving over mountains, cinematic`
-        - `A candle flame flickering in a dark room, macro shot`
+def ensure_chat_session():
+    if st.session_state.chat_session_id:
+        return
+    response = api_request("POST", "/chat/session", timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+    st.session_state.chat_session_id = payload["session_id"]
+    st.session_state.chat_messages = []
 
-        **Performance tips:**
-        - Start with **8 frames + 10 steps** for a fast test run (~30s)
-        - Increase frames/steps only when happy with motion
-        - `512×320` is sweet spot for quality vs speed
 
-        **If generation fails:**
-        - Wait 30s and retry (model cold-starting)
-        - Reduce frames to 8 for faster run
-        - Ensure `HF_API_KEY` has **inference** permission on HuggingFace
-        """)
+def load_chat_history(session_id: str):
+    response = api_request("GET", f"/chat/history/{session_id}", timeout=30)
+    if response.status_code == 200:
+        history = response.json()
+        st.session_state.chat_session_id = session_id
+        st.session_state.chat_messages = [
+            {"role": item["role"], "content": item["content"]}
+            for item in history.get("messages", [])
+        ]
+
 
 def show_rag_chat():
+    st.title("Chat with PDF & Documents")
+    st.caption("Chat history is stored in the backend for the logged-in user.")
 
-    if st.button("⬅ Back to Home"):
-        go_to("home")
+    ensure_chat_session()
 
-    st.title("📄 Chat with PDF & Documents")
-    st.caption("Session memory is preserved while this app is running.")
-
-    if "chat_session_id" not in st.session_state:
-        st.session_state.chat_session_id = None
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []
-
-    if st.session_state.chat_session_id is None:
-        try:
-            response = requests.post(f"{BACKEND_URL}/chat/session", timeout=30)
-            response.raise_for_status()
-            st.session_state.chat_session_id = response.json()["session_id"]
-        except Exception as error:
-            st.error(f"Unable to initialize chat session: {error}")
-            return
-
-    st.success(f"Session: {st.session_state.chat_session_id[:8]}...")
+    history_response = api_request("GET", "/auth/history", timeout=30)
+    if history_response.status_code == 200:
+        sessions = history_response.json().get("chat_sessions", [])
+        options = {item["title"]: item["id"] for item in sessions}
+        if options:
+            selected_title = st.selectbox("Saved Conversations", options=list(options.keys()))
+            if st.button("Load Conversation", key="load_conversation"):
+                load_chat_history(options[selected_title])
+        if st.button("Start New Conversation", key="new_conversation"):
+            st.session_state.chat_session_id = None
+            ensure_chat_session()
+            st.rerun()
 
     uploaded_file = st.file_uploader(
         "Upload document (PDF, DOCX, TXT, MD, CSV, JSON, PY, JS, TS)",
@@ -496,104 +491,157 @@ def show_rag_chat():
     if uploaded_file is not None and st.button("Index Document"):
         try:
             files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-            response = requests.post(
-                f"{BACKEND_URL}/chat/upload",
-                params={"session_id": st.session_state.chat_session_id},
+            response = api_request(
+                "POST",
+                f"/chat/upload?session_id={st.session_state.chat_session_id}",
                 files=files,
-                timeout=90,
+                timeout=120,
             )
             if response.status_code == 200:
                 info = response.json()
-                st.success(
-                    f"Indexed {info['filename']} in {info['chunks_indexed']} chunks"
-                )
+                st.success(f"Indexed {info['filename']} in {info['chunks_indexed']} chunks")
             else:
-                st.error(response.text)
+                show_api_error(response, "Document upload failed")
         except Exception as error:
-            st.error(f"Upload failed: {error}")
-
-    st.markdown("---")
+            show_request_exception(error, "Document upload failed")
 
     for message in st.session_state.chat_messages:
         with st.chat_message(message["role"]):
             st.write(message["content"])
 
     prompt = st.chat_input("Ask anything about your uploaded files...")
-
     if prompt:
         st.session_state.chat_messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
-
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 try:
-                    response = requests.post(
-                        f"{BACKEND_URL}/chat/message",
-                        json={
-                            "session_id": st.session_state.chat_session_id,
-                            "message": prompt,
-                        },
-                        timeout=120,
+                    response = api_request(
+                        "POST",
+                        "/chat/message",
+                        json={"session_id": st.session_state.chat_session_id, "message": prompt},
+                        timeout=180,
                     )
-
                     if response.status_code == 200:
                         result = response.json()
                         answer = result.get("answer", "No answer returned")
                         st.write(answer)
-                        st.caption(
-                            f"Retrieved chunks: {result.get('retrieved_chunks', 0)} | "
-                            f"Docs: {', '.join(result.get('documents', [])) or 'None'}"
-                        )
-                        st.session_state.chat_messages.append(
-                            {"role": "assistant", "content": answer}
-                        )
+                        st.session_state.chat_messages.append({"role": "assistant", "content": answer})
                     else:
-                        st.error(response.text)
+                        show_api_error(response, "Chat failed")
                 except Exception as error:
-                    st.error(f"Chat error: {error}")
+                    show_request_exception(error, "Chat failed")
 
 
+def show_history():
+    st.title("My History")
+    try:
+        response = api_request("GET", "/auth/history", timeout=30)
+        if response.status_code != 200:
+            show_api_error(response, "History load failed")
+            return
+        history = response.json()
+    except Exception as error:
+        show_request_exception(error, "History load failed")
+        return
+
+    st.subheader("Projects")
+    projects = history.get("projects", [])
+    if not projects:
+        st.info("No projects generated yet.")
+    for project in projects:
+        st.write(f"{project['project_name']}  |  {project['created_at']}")
+        download_response = api_request("GET", f"/download/{project['project_slug']}", timeout=120)
+        if download_response.status_code == 200:
+            st.download_button(
+                label=f"Download {project['project_name']}",
+                data=download_response.content,
+                file_name=f"{project['project_name']}.zip",
+                mime="application/zip",
+                key=f"project_{project['id']}",
+            )
+
+    st.subheader("Images & Videos")
+    assets = history.get("assets", [])
+    if not assets:
+        st.info("No media generated yet.")
+    for asset in assets:
+        st.write(f"{asset['asset_type'].title()}  |  {asset['created_at']}")
+        file_path = Path(asset["file_path"])
+        if file_path.exists():
+            if asset["asset_type"] == "image":
+                st.image(str(file_path), caption=asset["prompt"], width=280)
+            else:
+                st.image(str(file_path), caption=asset["prompt"], width=280)
+        download_response = api_request("GET", f"/auth/assets/{asset['id']}/download", timeout=120)
+        if download_response.status_code == 200:
+            st.download_button(
+                label=f"Download {asset['asset_type']}",
+                data=download_response.content,
+                file_name=file_path.name,
+                mime=asset["mime_type"],
+                key=f"asset_{asset['id']}",
+            )
+
+    st.subheader("Conversations")
+    sessions = history.get("chat_sessions", [])
+    if not sessions:
+        st.info("No conversations yet.")
+    for session in sessions:
+        st.write(f"{session['title']}  |  messages: {session['message_count']}")
+        if st.button("Open Conversation", key=f"session_{session['id']}"):
+            load_chat_history(session["id"])
+            go_to("rag_chat")
 
 
-# =============================
-# SIMPLE PLACEHOLDER PAGES
-# =============================
-def simple_page(title, message):
-    if st.button("⬅ Back to Home"):
-        go_to("home")
-    st.title(title)
-    st.info(message)
+def show_admin():
+    st.title("Admin Panel")
+    overview_response = api_request("GET", "/admin/overview", timeout=30)
+    users_response = api_request("GET", "/admin/users", timeout=30)
+    if overview_response.status_code != 200 or users_response.status_code != 200:
+        if overview_response.status_code != 200:
+            show_api_error(overview_response, "Admin load failed")
+        else:
+            show_api_error(users_response, "Admin load failed")
+        return
+
+    overview = overview_response.json()
+    users = users_response.json().get("users", [])
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Users", overview["total_users"])
+    col2.metric("Projects", overview["projects_generated"])
+    col3.metric("Assets", overview["assets_generated"])
+
+    st.subheader("Users")
+    st.dataframe(users, use_container_width=True)
 
 
-# =============================
-# ROUTER
-# =============================
-page = st.session_state.current_page
+init_state()
 
-if page == "home":
-    show_home()
+if not st.session_state.get("auth_token"):
+    st.session_state.current_page = "auth"
 
-elif page == "web_builder":
-    show_web_builder()
-
-elif page == "image_generation":
-    show_image_generation()
-
-elif page == "video_generation":
-    show_video_generation()           # ← NOW LIVE (was simple_page placeholder)
-
-elif page == "math_solver":
-    simple_page("📐 Math Solver", "Feature under development.")
-
-elif page == "rag_chat":
-    show_rag_chat()
-
-elif page == "prompt_generator":
-    simple_page("✨ Prompt Generator", "Feature under development.")
-
-elif page == "project_ai":
-    simple_page("💡 Project Suggestion AI", "Feature under development.")
-
-elif page == "research_bot":
-    simple_page("📚 Research / Thesis Bot", "Feature under development.")
+if st.session_state.current_page == "auth":
+    show_auth_page()
+else:
+    if require_auth():
+        render_sidebar()
+        page = st.session_state.current_page
+        if page == "home":
+            show_home()
+        elif page == "web_builder":
+            show_web_builder()
+        elif page == "image_generation":
+            show_image_generation()
+        elif page == "video_generation":
+            show_video_generation()
+        elif page == "rag_chat":
+            show_rag_chat()
+        elif page == "history":
+            show_history()
+        elif page == "admin":
+            show_admin()
+        else:
+            show_home()

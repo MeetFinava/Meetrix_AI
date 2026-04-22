@@ -1,0 +1,100 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+
+:root {
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --accent-strong: #ff8b4d;
+  --accent-soft: #ffd166;
+  --brand-cool: #7ce3d0;
+  --brand-cool-deep: #7d9cff;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0b1018;
+  --bg-secondary: #101827;
+  --surface: rgba(14, 20, 31, 0.82);
+  --surface-strong: rgba(11, 16, 24, 0.92);
+  --surface-raised: rgba(22, 30, 45, 0.94);
+  --surface-subtle: rgba(255, 255, 255, 0.05);
+  --input-bg: rgba(8, 13, 22, 0.7);
+  --text-primary: #eff5ff;
+  --text-secondary: rgba(239, 245, 255, 0.82);
+  --text-muted: rgba(239, 245, 255, 0.62);
+  --border-soft: rgba(255, 255, 255, 0.1);
+  --shadow-lg: 0 24px 80px rgba(0, 0, 0, 0.28);
+  --eyebrow-bg: rgba(255, 209, 102, 0.12);
+  --eyebrow-text: #ffd166;
+  --accent-panel: rgba(255, 139, 77, 0.14);
+  --accent-border: rgba(255, 139, 77, 0.34);
+  --blob-one: rgba(255, 139, 77, 0.28);
+  --blob-two: rgba(125, 156, 255, 0.24);
+  --blob-three: rgba(124, 227, 208, 0.2);
+  --grid-color: rgba(255, 255, 255, 0.035);
+}
+
+:root[data-theme='light'] {
+  --bg: #f5efe6;
+  --bg-secondary: #fff9f1;
+  --surface: rgba(255, 252, 247, 0.9);
+  --surface-strong: rgba(248, 241, 232, 0.94);
+  --surface-raised: rgba(255, 255, 255, 0.95);
+  --surface-subtle: rgba(129, 94, 59, 0.07);
+  --input-bg: rgba(255, 255, 255, 0.88);
+  --text-primary: #1b1b1f;
+  --text-secondary: rgba(27, 27, 31, 0.82);
+  --text-muted: rgba(27, 27, 31, 0.6);
+  --border-soft: rgba(75, 53, 31, 0.12);
+  --shadow-lg: 0 24px 80px rgba(90, 63, 36, 0.12);
+  --eyebrow-bg: rgba(255, 139, 77, 0.12);
+  --eyebrow-text: #a6551e;
+  --accent-panel: rgba(255, 139, 77, 0.14);
+  --accent-border: rgba(255, 139, 77, 0.34);
+  --blob-one: rgba(255, 173, 114, 0.28);
+  --blob-two: rgba(125, 156, 255, 0.18);
+  --blob-three: rgba(124, 227, 208, 0.18);
+  --grid-color: rgba(56, 39, 20, 0.045);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-strong) 10%, transparent), transparent 34%),
+    radial-gradient(circle at 82% 20%, color-mix(in srgb, var(--brand-cool) 12%, transparent), transparent 30%),
+    linear-gradient(180deg, var(--bg-secondary), var(--bg));
+  color: var(--text-primary);
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+button {
+  appearance: none;
+}
+
+a {
+  color: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}

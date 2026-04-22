@@ -1,27 +1,20 @@
 import os
 import re
-import uuid
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import List
 
+from fastapi import HTTPException, status
 from groq import Groq
-from langchain_text_splitters  import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sqlalchemy.orm import Session
 
-
-@dataclass  
-class SessionState:
-    session_id: str
-    history: List[dict] = field(default_factory=list)
-    chunks: List[str] = field(default_factory=list)
-    source_files: List[str] = field(default_factory=list)
+from app.models import ChatDocument, ChatMessage, ChatSessionRecord, User
 
 
 class DocumentChatService:
     """
-    In-memory conversational RAG service.
-    - Keeps per-session chat memory.
-    - Stores and retrieves document chunks.
-    - Uses Groq with open-source models (Llama/Qwen families).
+    Database-backed conversational RAG service.
+    - Stores chat sessions, uploaded documents, and messages in PostgreSQL.
+    - Retrieves context from persisted documents per user session.
     """
 
     def __init__(self) -> None:
@@ -31,56 +24,95 @@ class DocumentChatService:
 
         self.client = Groq(api_key=api_key)
         self.model = os.getenv("OPEN_SOURCE_CHAT_MODEL", "llama-3.3-70b-versatile")
-        self.sessions: Dict[str, SessionState] = {}
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=900,
             chunk_overlap=160,
             separators=["\n\n", "\n", ". ", " ", ""],
         )
 
-    def create_session(self) -> str:
-        session_id = str(uuid.uuid4())
-        self.sessions[session_id] = SessionState(session_id=session_id)
-        return session_id
+    def create_session(self, db: Session, user: User, title: str | None = None) -> ChatSessionRecord:
+        session = ChatSessionRecord(user_id=user.id, title=(title or "New Conversation")[:255])
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return session
 
-    def get_session(self, session_id: str) -> SessionState:
-        if session_id not in self.sessions:
-            self.sessions[session_id] = SessionState(session_id=session_id)
-        return self.sessions[session_id]
+    def get_session(self, db: Session, session_id: str, user: User) -> ChatSessionRecord:
+        session = (
+            db.query(ChatSessionRecord)
+            .filter(ChatSessionRecord.id == session_id, ChatSessionRecord.user_id == user.id)
+            .first()
+        )
+        if not session:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+        return session
 
-    def add_document(self, session_id: str, filename: str, text: str) -> int:
+    def add_document(
+        self,
+        db: Session,
+        session: ChatSessionRecord,
+        filename: str,
+        text: str,
+    ) -> int:
         clean_text = text.strip()
         if not clean_text:
             return 0
 
-        session = self.get_session(session_id)
         chunks = self.splitter.split_text(clean_text)
-        session.chunks.extend(chunks)
-        session.source_files.append(filename)
+        document = ChatDocument(
+            chat_session_id=session.id,
+            filename=filename[:255],
+            extracted_text=clean_text,
+            chunk_count=len(chunks),
+        )
+        db.add(document)
+        db.commit()
         return len(chunks)
 
     def _score_chunk(self, chunk: str, query_terms: set[str]) -> int:
         chunk_terms = set(re.findall(r"\w+", chunk.lower()))
         return len(query_terms.intersection(chunk_terms))
 
-    def retrieve_context(self, session_id: str, query: str, top_k: int = 5) -> List[str]:
-        session = self.get_session(session_id)
-        if not session.chunks:
+    def retrieve_context(self, db: Session, session: ChatSessionRecord, query: str, top_k: int = 5) -> List[str]:
+        documents = (
+            db.query(ChatDocument)
+            .filter(ChatDocument.chat_session_id == session.id)
+            .order_by(ChatDocument.created_at.asc())
+            .all()
+        )
+        if not documents:
             return []
+
+        chunks: list[str] = []
+        for document in documents:
+            chunks.extend(self.splitter.split_text(document.extracted_text))
 
         query_terms = set(re.findall(r"\w+", query.lower()))
         scored = [
             (self._score_chunk(chunk, query_terms), idx, chunk)
-            for idx, chunk in enumerate(session.chunks)
+            for idx, chunk in enumerate(chunks)
         ]
         scored.sort(key=lambda item: (item[0], -item[1]), reverse=True)
 
         best_chunks = [item[2] for item in scored[:top_k] if item[0] > 0]
-        return best_chunks if best_chunks else session.chunks[: min(top_k, len(session.chunks))]
+        return best_chunks if best_chunks else chunks[: min(top_k, len(chunks))]
 
-    def ask(self, session_id: str, message: str) -> dict:
-        session = self.get_session(session_id)
-        context_chunks = self.retrieve_context(session_id, message)
+    def ask(self, db: Session, session: ChatSessionRecord, message: str) -> dict:
+        context_chunks = self.retrieve_context(db, session, message)
+        source_files = [
+            item.filename
+            for item in db.query(ChatDocument)
+            .filter(ChatDocument.chat_session_id == session.id)
+            .order_by(ChatDocument.created_at.asc())
+            .all()
+        ]
+
+        history = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.chat_session_id == session.id)
+            .order_by(ChatMessage.created_at.asc())
+            .all()
+        )
 
         context_block = "\n\n".join(
             [f"[DOC CHUNK {i + 1}]\n{chunk}" for i, chunk in enumerate(context_chunks)]
@@ -93,9 +125,8 @@ class DocumentChatService:
         )
 
         messages = [{"role": "system", "content": system_prompt}]
-
-        for turn in session.history[-8:]:
-            messages.append(turn)
+        for turn in history[-8:]:
+            messages.append({"role": turn.role, "content": turn.content})
 
         user_payload = message
         if context_block:
@@ -115,18 +146,31 @@ class DocumentChatService:
 
         answer = completion.choices[0].message.content
 
-        session.history.append({"role": "user", "content": message})
-        session.history.append({"role": "assistant", "content": answer})
+        db.add(ChatMessage(chat_session_id=session.id, role="user", content=message))
+        db.add(
+            ChatMessage(
+                chat_session_id=session.id,
+                role="assistant",
+                content=answer,
+                retrieved_chunks=len(context_chunks),
+                documents_json=source_files,
+            )
+        )
+        if session.title == "New Conversation":
+            session.title = message[:80]
+        db.commit()
+        db.refresh(session)
 
         return {
             "answer": answer,
-            "session_id": session_id,
+            "session_id": session.id,
             "retrieved_chunks": len(context_chunks),
-            "documents": session.source_files,
+            "documents": source_files,
+            "title": session.title,
         }
 
 
-chat_document_service: Optional[DocumentChatService] = None
+chat_document_service: DocumentChatService | None = None
 
 
 def get_chat_document_service() -> DocumentChatService:
