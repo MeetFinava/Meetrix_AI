@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.auth import SESSION_TTL_HOURS, authenticate_user, create_session_token, hash_password, hash_token
 from app.database import get_db

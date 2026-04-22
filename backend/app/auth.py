@@ -4,7 +4,7 @@ import hmac
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-
+from sqlalchemy import func
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
