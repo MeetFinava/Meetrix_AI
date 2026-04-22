@@ -1,12 +1,12 @@
+# backend/pyproject.toml  (UPDATED — adds video generation dependencies)
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "Meetrix AI Backend"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "base>=0.0.0",
-    "callbacks>=0.3.0",
+    # --- existing deps ---
     "fastapi>=0.129.2",
     "langchain>=1.2.10",
     "langchain-community>=0.4.1",
@@ -16,4 +16,15 @@ dependencies = [
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
     "uvicorn>=0.41.0",
+    "requests>=2.31.0",
+    # --- NEW: video generation (MP4 → GIF conversion) ---
+    "imageio>=2.35.0",
+    "imageio[pyav]>=2.35.0",   # PyAV backend for reading MP4 frames
+    "Pillow>=10.0.0",           # PIL for GIF encoding
+    "av>=12.0.0",               # PyAV (ffmpeg bindings) — pulled in by imageio[pyav]
+    "python-multipart>=0.0.20",
+    "pypdf>=5.9.0",
+    "python-docx>=1.1.2",
+    "langchain-text-splitters>=1.1.1",
 ]
+

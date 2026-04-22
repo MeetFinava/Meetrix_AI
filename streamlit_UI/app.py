@@ -62,12 +62,12 @@ def show_home():
     features = [
         ("🛠 Web Builder", "Generate full-stack apps instantly.", "web_builder"),
         ("🎨 Image Generation", "AI image creation engine.", "image_generation"),
-        ("🎬 Video Generation", "Generate AI videos.", "video_generation"),
+        ("🎬 Video Generation", "Generate AI videos from text.", "video_generation"),
         ("📐 Math Solver", "Solve equations step-by-step.", "math_solver"),
         ("📄 Chat with PDF (RAG)", "Ask questions from documents.", "rag_chat"),
         ("✨ Prompt Generator", "Generate powerful prompts.", "prompt_generator"),
         ("💡 Project Suggestion AI", "Get smart project ideas.", "project_ai"),
-        ("📚 Research / Thesis Bot", "Academic research assistant.", "research_bot")
+        ("📚 Research / Thesis Bot", "Academic research assistant.", "research_bot"),
     ]
 
     columns = [col1, col2, col3]
@@ -82,6 +82,7 @@ def show_home():
 
             if st.button("Open", key=key):
                 go_to(key)
+
 
 # =============================
 # WEB BUILDER PAGE
@@ -136,7 +137,6 @@ def show_web_builder():
                 ["Home", "About", "Contact", "Services", "Blog", "Login", "Dashboard"]
             )
 
-            # ✅ REQUIRED FIELDS (FIXED)
             authentication = st.checkbox("Authentication")
             payment_integration = st.checkbox("Payment Integration")
             admin_panel = st.checkbox("Admin Panel")
@@ -157,7 +157,7 @@ def show_web_builder():
             "pages": pages,
             "authentication": authentication,
             "payment_integration": payment_integration,
-            "admin_panel": admin_panel
+            "admin_panel": admin_panel,
         }
 
         st.subheader("📁 Building Project Live...")
@@ -165,7 +165,7 @@ def show_web_builder():
         response = requests.post(
             f"{BACKEND_URL}/build-project",
             json=payload,
-            stream=True
+            stream=True,
         )
 
         output_area = st.empty()
@@ -198,6 +198,9 @@ def show_web_builder():
             st.error("❌ Project Build Failed.")
 
 
+# =============================
+# IMAGE GENERATION PAGE
+# =============================
 def show_image_generation():
 
     if st.button("⬅ Back to Home"):
@@ -208,7 +211,7 @@ def show_image_generation():
     with st.form("image_form"):
         prompt = st.text_area(
             "Enter Prompt",
-            placeholder="A futuristic hospital UI design, modern, clean..."
+            placeholder="A futuristic hospital UI design, modern, clean...",
         )
 
         col1, col2 = st.columns(2)
@@ -219,14 +222,11 @@ def show_image_generation():
 
         negative_prompt = st.text_input(
             "Negative Prompt (optional)",
-            placeholder="blurry, low quality"
+            placeholder="blurry, low quality",
         )
 
         submitted = st.form_submit_button("Generate Image")
 
-    # =============================
-    # GENERATE IMAGE
-    # =============================
     if submitted:
 
         if not prompt.strip():
@@ -237,55 +237,39 @@ def show_image_generation():
             "prompt": prompt,
             "negative_prompt": negative_prompt,
             "width": width,
-            "height": height
+            "height": height,
         }
 
         st.subheader("🧠 Generating Image...")
 
         with st.spinner("AI is creating your image..."):
-
             try:
                 response = requests.post(
                     f"{BACKEND_URL}/image/generate-image",
-                    json=payload
+                    json=payload,
                 )
 
-                # =============================
-                # SUCCESS RESPONSE
-                # =============================
                 if response.status_code == 200:
-
                     content_type = response.headers.get("content-type", "")
 
-                    # ✅ Check if it's actually an image
                     if "image" in content_type:
-
                         st.image(
                             response.content,
                             caption="Generated Image",
-                            use_container_width=True
+                            use_container_width=True,
                         )
-
                         st.success("✅ Image Generated Successfully!")
-
                         st.download_button(
                             label="⬇️ Download Image",
                             data=response.content,
                             file_name="generated_image.png",
-                            mime="image/png"
+                            mime="image/png",
                         )
-
                     else:
-                        # ❌ Not an image (probably error JSON)
                         st.error("❌ Invalid response from server")
                         st.text(response.text)
-
-                # =============================
-                # ERROR RESPONSE
-                # =============================
                 else:
                     error_msg = response.text
-
                     if "loading" in error_msg.lower():
                         st.warning("⏳ Model is loading... try again in 10 seconds")
                     else:
@@ -295,15 +279,292 @@ def show_image_generation():
             except Exception as e:
                 st.error(f"🚨 Error: {e}")
 
-                
+
 # =============================
-# SIMPLE FEATURE PAGES
+# VIDEO GENERATION PAGE  ← NEW
+# =============================
+def show_video_generation():
+
+    if st.button("⬅ Back to Home"):
+        go_to("home")
+
+    st.title("🎬 Video Generation")
+    st.caption("Powered by ModelScope Text-to-Video 1.7B (Open-Source · Apache 2.0)")
+
+    st.info(
+        "⏳ **Video generation takes 1–3 minutes** on first run (model cold start). "
+        "Subsequent requests are faster. Keep the tab open and wait — "
+        "a loading spinner will show progress."
+    )
+
+    # ── Form ─────────────────────────────────────────────────────────────────
+    with st.form("video_form"):
+
+        prompt = st.text_area(
+            "📝 Video Prompt",
+            placeholder=(
+                "A panda eating bamboo in a lush forest, cinematic, 4k...\n"
+                "Tip: Be descriptive — mention lighting, motion, style."
+            ),
+            height=100,
+        )
+
+        negative_prompt = st.text_input(
+            "🚫 Negative Prompt (optional)",
+            placeholder="blurry, low quality, static, no motion",
+        )
+
+        st.markdown("#### ⚙️ Advanced Settings")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            num_frames = st.select_slider(
+                "Frames",
+                options=[8, 12, 16, 20, 24],
+                value=16,
+                help="More frames = longer video but slower generation",
+            )
+            fps = st.select_slider(
+                "Playback FPS",
+                options=[4, 6, 8, 10, 12],
+                value=8,
+            )
+
+        with col2:
+            width = st.selectbox("Width (px)", [256, 320, 512], index=2)
+            height = st.selectbox("Height (px)", [256, 320, 512], index=1)
+
+        with col3:
+            num_inference_steps = st.slider(
+                "Inference Steps",
+                min_value=10,
+                max_value=50,
+                value=25,
+                step=5,
+                help="Higher = better quality, slower generation",
+            )
+            guidance_scale = st.slider(
+                "Guidance Scale",
+                min_value=1.0,
+                max_value=15.0,
+                value=7.5,
+                step=0.5,
+                help="How closely the video follows your prompt",
+            )
+
+        submitted = st.form_submit_button("🎬 Generate Video", use_container_width=True)
+
+    # ── Generate ─────────────────────────────────────────────────────────────
+    if submitted:
+
+        if not prompt.strip():
+            st.warning("⚠️ Please enter a prompt before generating.")
+            return
+
+        payload = {
+            "prompt":               prompt.strip(),
+            "negative_prompt":      negative_prompt.strip() or None,
+            "num_frames":           num_frames,
+            "num_inference_steps":  num_inference_steps,
+            "guidance_scale":       guidance_scale,
+            "width":                width,
+            "height":               height,
+            "fps":                  fps,
+        }
+
+        est_seconds = int(num_frames * num_inference_steps * 0.4)
+        st.markdown(f"🕐 Estimated time: **~{est_seconds}–{est_seconds + 60} seconds**")
+
+        with st.spinner("🧠 AI is generating your video... Please wait (1–3 min)"):
+            try:
+                response = requests.post(
+                    f"{BACKEND_URL}/video/generate-video",
+                    json=payload,
+                    timeout=360,
+                )
+
+                if response.status_code == 200:
+                    content_type = response.headers.get("content-type", "")
+
+                    if "image/gif" in content_type or len(response.content) > 1000:
+                        st.success("✅ Video Generated Successfully!")
+
+                        st.image(
+                            response.content,
+                            caption=f"Generated Video ({num_frames} frames @ {fps} fps)",
+                            use_container_width=True,
+                        )
+
+                        with st.expander("📝 Prompt used"):
+                            st.write(f"**Prompt:** {prompt}")
+                            if negative_prompt:
+                                st.write(f"**Negative:** {negative_prompt}")
+                            st.write(
+                                f"**Settings:** {num_frames} frames | "
+                                f"{width}×{height}px | "
+                                f"{num_inference_steps} steps | "
+                                f"CFG {guidance_scale} | "
+                                f"{fps} fps"
+                            )
+
+                        st.download_button(
+                            label="⬇️ Download GIF",
+                            data=response.content,
+                            file_name="meetrix_ai_video.gif",
+                            mime="image/gif",
+                            use_container_width=True,
+                        )
+                    else:
+                        st.error("❌ Received an invalid response from server.")
+                        st.text(response.text[:500])
+
+                else:
+                    error_text = response.text.lower()
+                    if "loading" in error_text:
+                        st.warning(
+                            "⏳ Model is loading (~30–60s cold start). "
+                            "Click **Generate Video** again in ~30 seconds."
+                        )
+                    elif "timeout" in error_text:
+                        st.warning(
+                            "⏳ Timed out — try reducing **Frames** to 8 and **Steps** to 10."
+                        )
+                    else:
+                        st.error(f"❌ Generation failed (HTTP {response.status_code})")
+                        st.code(response.text[:800])
+
+            except requests.exceptions.Timeout:
+                st.error(
+                    "🚨 Timed out after 6 minutes. "
+                    "Reduce Frames to 8 and Steps to 10 for a faster result."
+                )
+            except requests.exceptions.ConnectionError:
+                st.error(
+                    "🚨 Cannot connect to backend. "
+                    "Make sure FastAPI is running at http://localhost:8000"
+                )
+            except Exception as e:
+                st.error(f"🚨 Unexpected error: {e}")
+
+    with st.expander("💡 Tips for better videos"):
+        st.markdown("""
+        **Good prompts:**
+        - `A golden retriever running on a beach at sunset, slow motion`
+        - `Time-lapse of clouds moving over mountains, cinematic`
+        - `A candle flame flickering in a dark room, macro shot`
+
+        **Performance tips:**
+        - Start with **8 frames + 10 steps** for a fast test run (~30s)
+        - Increase frames/steps only when happy with motion
+        - `512×320` is sweet spot for quality vs speed
+
+        **If generation fails:**
+        - Wait 30s and retry (model cold-starting)
+        - Reduce frames to 8 for faster run
+        - Ensure `HF_API_KEY` has **inference** permission on HuggingFace
+        """)
+
+def show_rag_chat():
+
+    if st.button("⬅ Back to Home"):
+        go_to("home")
+
+    st.title("📄 Chat with PDF & Documents")
+    st.caption("Session memory is preserved while this app is running.")
+
+    if "chat_session_id" not in st.session_state:
+        st.session_state.chat_session_id = None
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+
+    if st.session_state.chat_session_id is None:
+        try:
+            response = requests.post(f"{BACKEND_URL}/chat/session", timeout=30)
+            response.raise_for_status()
+            st.session_state.chat_session_id = response.json()["session_id"]
+        except Exception as error:
+            st.error(f"Unable to initialize chat session: {error}")
+            return
+
+    st.success(f"Session: {st.session_state.chat_session_id[:8]}...")
+
+    uploaded_file = st.file_uploader(
+        "Upload document (PDF, DOCX, TXT, MD, CSV, JSON, PY, JS, TS)",
+        type=["pdf", "docx", "txt", "md", "csv", "json", "py", "js", "ts"],
+    )
+
+    if uploaded_file is not None and st.button("Index Document"):
+        try:
+            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+            response = requests.post(
+                f"{BACKEND_URL}/chat/upload",
+                params={"session_id": st.session_state.chat_session_id},
+                files=files,
+                timeout=90,
+            )
+            if response.status_code == 200:
+                info = response.json()
+                st.success(
+                    f"Indexed {info['filename']} in {info['chunks_indexed']} chunks"
+                )
+            else:
+                st.error(response.text)
+        except Exception as error:
+            st.error(f"Upload failed: {error}")
+
+    st.markdown("---")
+
+    for message in st.session_state.chat_messages:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
+
+    prompt = st.chat_input("Ask anything about your uploaded files...")
+
+    if prompt:
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.write(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    response = requests.post(
+                        f"{BACKEND_URL}/chat/message",
+                        json={
+                            "session_id": st.session_state.chat_session_id,
+                            "message": prompt,
+                        },
+                        timeout=120,
+                    )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        answer = result.get("answer", "No answer returned")
+                        st.write(answer)
+                        st.caption(
+                            f"Retrieved chunks: {result.get('retrieved_chunks', 0)} | "
+                            f"Docs: {', '.join(result.get('documents', [])) or 'None'}"
+                        )
+                        st.session_state.chat_messages.append(
+                            {"role": "assistant", "content": answer}
+                        )
+                    else:
+                        st.error(response.text)
+                except Exception as error:
+                    st.error(f"Chat error: {error}")
+
+
+
+
+# =============================
+# SIMPLE PLACEHOLDER PAGES
 # =============================
 def simple_page(title, message):
     if st.button("⬅ Back to Home"):
         go_to("home")
     st.title(title)
     st.info(message)
+
 
 # =============================
 # ROUTER
@@ -320,13 +581,13 @@ elif page == "image_generation":
     show_image_generation()
 
 elif page == "video_generation":
-    simple_page("🎬 Video Generation", "Feature under development.")
+    show_video_generation()           # ← NOW LIVE (was simple_page placeholder)
 
 elif page == "math_solver":
     simple_page("📐 Math Solver", "Feature under development.")
 
 elif page == "rag_chat":
-    simple_page("📄 Chat with PDF (RAG)", "Feature under development.")
+    show_rag_chat()
 
 elif page == "prompt_generator":
     simple_page("✨ Prompt Generator", "Feature under development.")
